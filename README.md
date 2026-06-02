@@ -292,6 +292,8 @@ First dashboard load may take ~10–15 seconds while the portfolio snapshot is b
 
 ## Run with Docker
 
+Docker deployment configuration is available in the repository (`Dockerfile`, `docker-compose.yml`). Configuration has been prepared for a two-service setup; successful `docker compose up --build` depends on your local Docker Desktop installation and environment.
+
 **Prerequisites:** Docker Desktop, `data/application_train.csv`, and `models/` artifacts on the host.
 
 ```powershell
@@ -304,6 +306,8 @@ docker compose up --build
 | Backend (FastAPI) | [http://localhost:8000](http://localhost:8000) |
 
 The frontend waits for the backend health check and uses `CREDIT_RISK_API_URL=http://backend:8000` inside the Compose network.
+
+> **Note:** Docker configuration is included and documented below; end-to-end container validation was not confirmed in the author’s environment at documentation time. Local runs via [Run locally](#run-locally) are the verified execution path.
 
 ---
 
@@ -362,7 +366,7 @@ credit_risk_prediction/
 | Decision Rules | ✓ Complete |
 | AI Data Analyst | ✓ Complete |
 | Login & app shell | ✓ Complete |
-| Docker deployment | ✓ Complete |
+| Docker deployment | Configuration prepared (validation pending) |
 
 Further detail: [documents/project_journal.md](documents/project_journal.md)
 

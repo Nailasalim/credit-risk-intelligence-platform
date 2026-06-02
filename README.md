@@ -178,7 +178,7 @@ Applicant form and scoring result.
 
 | | |
 |:---:|:---:|
-| Applicant input | Decision output |
+| Risk Analysis- 1 | Risk Analysis - 2 |
 | ![Risk Prediction 1](documents/screenshots/risk_prediction1.png) | ![Risk Prediction 2](documents/screenshots/risk_prediction2.png) |
 
 ### Explainability
@@ -187,7 +187,7 @@ Applicant-level drivers and SHAP contribution view.
 
 | | |
 |:---:|:---:|
-| Risk summary & drivers | SHAP contributions |
+| Risk summary & drivers | Custom explainability |
 | ![Explainability 1](documents/screenshots/explainability1.png) | ![Explainability 2](documents/screenshots/explainability2.png) |
 
 ### Decision Rules

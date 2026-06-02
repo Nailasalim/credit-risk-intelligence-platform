@@ -85,7 +85,9 @@ Only capabilities that are implemented and available in the app today.
 
 ## Architecture
 
-![CreditIQ system architecture](documents/screenshots/architecture_diag.png)
+<p align="center">
+  <img src="documents/screenshots/architecture_diag.png" alt="CreditIQ system architecture" width="560" />
+</p>
 
 - **Streamlit** — single app shell (`ui/streamlit_app.py`), page modules per feature.  
 - **FastAPI** — inference and rules for individual applicants (`/predict`, `/decision`, `/rules`, `/health`, `/dashboard/summary`).  
@@ -412,7 +414,7 @@ First dashboard load may take ~10–15 seconds while the portfolio snapshot is b
 
 ## Run with Docker
 
-Docker deployment configuration is available in the repository (`Dockerfile`, `docker-compose.yml`). Configuration has been prepared for a two-service setup; successful `docker compose up --build` depends on your local Docker Desktop installation and environment.
+Docker deployment has been tested and verified locally using the current repository configuration (`Dockerfile`, `docker-compose.yml`).
 
 **Prerequisites:** Docker Desktop, `data/application_train.csv`, and `models/` artifacts on the host.
 
@@ -427,7 +429,18 @@ docker compose up --build
 
 The frontend waits for the backend health check and uses `CREDIT_RISK_API_URL=http://backend:8000` inside the Compose network.
 
-> **Note:** Docker configuration is included and documented below; end-to-end container validation was not confirmed in the author’s environment at documentation time. Local runs via [Run locally](#run-locally) are the verified execution path.
+> **Note:** Docker configuration is included in the project and has been validated locally. End-to-end execution depends on a working local Docker Desktop environment.
+
+## Docker validation
+
+Local validation checks completed:
+
+- **Build command:** `docker compose up --build`
+- **Frontend URL:** `http://localhost:8501`
+- **API URL:** `http://localhost:8000`
+- **API Docs URL:** `http://localhost:8000/docs`
+
+Validation confirmed successful image build, healthy backend startup, frontend availability, and working Compose networking between `creditiq-frontend` and `creditiq-backend`.
 
 ---
 
@@ -486,7 +499,7 @@ credit_risk_prediction/
 | Decision Rules | ✓ Complete |
 | AI Data Analyst | ✓ Complete |
 | Login & app shell | ✓ Complete |
-| Docker deployment | Configuration prepared (validation pending) |
+| Docker deployment | ✓ Complete (validated locally) |
 
 Further detail: [documents/project_journal.md](documents/project_journal.md)
 

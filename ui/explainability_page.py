@@ -1,31 +1,32 @@
 """
-Explainability page — enterprise credit-risk explanation dashboard.
+Explainability page — compact underwriting explanation view (UI only).
 """
 
 from __future__ import annotations
 
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Any, Callable
 
+import altair as alt
 import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 from app_navigation import EXPLAIN_MODE_CUSTOM, EXPLAIN_MODE_LATEST
+from assessment_store import get_latest_assessment
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.data.preprocessor import preprocess_applicant  # noqa: E402
+from src.ml.rule_explain import feature_label as _feature_label  # noqa: E402
 
 MODELS_DIR = PROJECT_ROOT / "models"
 FEATURE_NAMES_PATH = MODELS_DIR / "feature_names.json"
-SHAP_VALUES_PATH = MODELS_DIR / "shap_values.npy"
 MODEL_PATH = MODELS_DIR / "model.pkl"
 
 FEATURE_LABELS: dict[str, str] = {
@@ -34,7 +35,7 @@ FEATURE_LABELS: dict[str, str] = {
     "EXT_SOURCE_3": "External credit score 3",
     "AMT_INCOME_TOTAL": "Annual income",
     "AMT_CREDIT": "Credit amount",
-    "AMT_ANNUITY": "Monthly annuity",
+    "AMT_ANNUITY": "Monthly EMI",
     "AMT_GOODS_PRICE": "Goods price",
     "DAYS_BIRTH": "Applicant age",
     "DAYS_EMPLOYED": "Employment history",
@@ -42,7 +43,7 @@ FEATURE_LABELS: dict[str, str] = {
     "REGION_RATING_CLIENT_W_CITY": "Region & city rating",
     "INCOME_CREDIT_RATIO": "Income-to-credit ratio",
     "ANNUITY_INCOME_RATIO": "Annuity-to-income ratio",
-    "CREDIT_GOODS_RATIO": "Credit-to-goods ratio",
+    "CREDIT_GOODS_RATIO": "Loan-to-Goods Ratio",
     "DAYS_LAST_PHONE_CHANGE": "Phone stability",
     "DAYS_ID_PUBLISH": "ID tenure",
     "REG_CITY_NOT_WORK_CITY": "Work vs registered address",
@@ -72,41 +73,6 @@ def load_feature_names() -> list[str]:
         return json.load(file)
 
 
-@st.cache_data
-def load_global_importance() -> pd.DataFrame:
-    names = load_feature_names()
-
-    if SHAP_VALUES_PATH.is_file():
-        shap_matrix = np.load(SHAP_VALUES_PATH)
-        if shap_matrix.ndim != 2 or shap_matrix.shape[1] != len(names):
-            raise ValueError(
-                f"Expected shap_values shape (n_samples, {len(names)}), got {shap_matrix.shape}"
-            )
-        mean_abs = np.abs(shap_matrix).mean(axis=0)
-        median_signed = np.median(shap_matrix, axis=0)
-        direction = np.sign(median_signed)
-        direction = np.where(direction == 0, np.sign(shap_matrix.mean(axis=0)), direction)
-        direction = np.where(direction == 0, 1.0, direction)
-        display_impact = direction * mean_abs
-        source = "global_shap"
-    else:
-        model = load_model()
-        raw = np.asarray(model.feature_importances_, dtype=float)
-        mean_abs = raw / raw.sum()
-        display_impact = mean_abs
-        source = "model_gain"
-
-    frame = pd.DataFrame(
-        {
-            "feature": names,
-            "importance": mean_abs,
-            "display_impact": display_impact,
-            "source": source,
-        }
-    )
-    return frame.sort_values("importance", ascending=False).reset_index(drop=True)
-
-
 def compute_contributions(applicant_payload: dict[str, Any]) -> pd.DataFrame:
     model = load_model()
     features = preprocess_applicant(applicant_payload)
@@ -118,65 +84,58 @@ def compute_contributions(applicant_payload: dict[str, Any]) -> pd.DataFrame:
     return frame.sort_values("abs_impact", ascending=False).reset_index(drop=True)
 
 
-def _concise_driver_title(feature: str, impact: float, payload: dict[str, Any]) -> str:
+def _driver_label(feature: str, impact: float, payload: dict[str, Any]) -> str:
     val = payload.get(feature)
-    if feature == "EXT_SOURCE_1":
-        return "Low external credit score 1" if val is not None and float(val) < 0.5 else "External credit score 1"
-    if feature == "EXT_SOURCE_2":
-        return "Low EXT_SOURCE_2" if val is not None and float(val) < 0.5 else "EXT_SOURCE_2"
-    if feature == "EXT_SOURCE_3":
-        return "Low external credit score 3" if val is not None and float(val) < 0.5 else "External credit score 3"
+    if feature == "EXT_SOURCE_2" and val is not None and float(val) < 0.5:
+        return "Low External Credit Score 2"
+    if feature == "EXT_SOURCE_3" and val is not None and float(val) < 0.5:
+        return "Low External Credit Score 3"
+    if feature == "EXT_SOURCE_1" and val is not None and float(val) < 0.5:
+        return "Low External Credit Score 1"
     if feature == "DAYS_EMPLOYED" and val is not None and abs(int(val)) / 365.25 < 2:
         return "Short employment history"
     if feature == "ANNUITY_INCOME_RATIO" and val is not None and float(val) > 0.30:
         return "High annuity burden"
-    if feature == "AMT_ANNUITY" and impact > 0:
-        return "High annuity burden"
     if feature == "INCOME_CREDIT_RATIO" and val is not None and float(val) < 0.2:
         return "High credit burden"
-    if feature == "AMT_INCOME_TOTAL" and impact < 0:
-        return "Stable income"
-    if feature == "FLAG_DOCUMENT_3" and val == 1:
-        return "ID document verified"
-    if feature == "FLAG_EMP_PHONE" and val == 1:
-        return "Employer phone available"
-    if feature == "OWN_CAR_AGE" and impact < 0:
-        return "Vehicle ownership"
-    if feature.startswith("EXT_SOURCE") and val is not None and float(val) >= 0.65:
-        return "Strong credit history"
-    if impact > 0:
-        return FEATURE_LABELS.get(feature, feature)
-    return FEATURE_LABELS.get(feature, feature)
+    if feature.startswith("EXT_SOURCE") and val is not None and float(val) >= 0.65 and impact < 0:
+        return "Strong external credit history"
+    return FEATURE_LABELS.get(feature, _feature_label(feature))
 
 
-def split_drivers(contributions: pd.DataFrame, payload: dict[str, Any]) -> tuple[list[dict], list[dict]]:
-    risk_rows = contributions[contributions["impact"] > 0].head(3)
-    positive_rows = contributions[contributions["impact"] < 0].head(3)
-
-    def pack(rows: pd.DataFrame) -> list[dict]:
-        return [
-            {
-                "title": _concise_driver_title(row.feature, float(row.impact), payload),
-                "impact": float(row.impact),
-            }
-            for row in rows.itertuples()
-        ]
-
-    return pack(risk_rows), pack(positive_rows)
+def split_drivers(contributions: pd.DataFrame, payload: dict[str, Any]) -> tuple[list[str], list[str]]:
+    risk_titles = [
+        _driver_label(str(row.feature), float(row.impact), payload)
+        for row in contributions[contributions["impact"] > 0].head(3).itertuples()
+    ]
+    positive_titles = [
+        _driver_label(str(row.feature), float(row.impact), payload)
+        for row in contributions[contributions["impact"] < 0].head(3).itertuples()
+    ]
+    return risk_titles, positive_titles
 
 
-def build_business_summary(
+def build_concise_summary(
     risk_band: str,
-    risk_drivers: list[dict],
-    positive_factors: list[dict],
+    risk_drivers: list[str],
+    positive_factors: list[str],
 ) -> str:
-    band = {"LOW": "Low", "MEDIUM": "Medium", "HIGH": "High"}.get(risk_band.upper(), risk_band)
+    """Two to three sentences for the AI Summary card."""
+    band = {"LOW": "low", "MEDIUM": "medium", "HIGH": "high"}.get(risk_band.upper(), risk_band.lower())
     if not risk_drivers:
-        return f"This applicant was classified as **{band} Risk** with a broadly balanced profile."
-    drivers = ", ".join(d["title"].lower() for d in risk_drivers[:3])
-    text = f"This applicant was classified as **{band} Risk** primarily due to {drivers}."
+        return (
+            f"This applicant is assessed as {band} risk with no dominant adverse drivers "
+            "in the local SHAP profile."
+        )
+    lead = risk_drivers[0].lower()
+    text = (
+        f"This applicant is assessed as {band} risk, primarily influenced by {lead}"
+    )
+    if len(risk_drivers) > 1:
+        text += f" and {risk_drivers[1].lower()}"
+    text += "."
     if positive_factors:
-        text += f" Partially offset by {', '.join(p['title'].lower() for p in positive_factors[:2])}."
+        text += f" {positive_factors[0]} partially offsets default risk."
     return text
 
 
@@ -197,6 +156,31 @@ def _init_explainability_mode() -> None:
         )
 
 
+def _badge_class_risk(band: str) -> str:
+    return {"LOW": "xai-badge-low", "MEDIUM": "xai-badge-med", "HIGH": "xai-badge-high"}.get(
+        band.upper(), "xai-badge-med"
+    )
+
+
+def _badge_class_rec(rec: str) -> str:
+    return {
+        "APPROVE": "xai-badge-approve",
+        "REVIEW": "xai-badge-review",
+        "DECLINE": "xai-badge-decline",
+    }.get(rec.upper(), "xai-badge-review")
+
+
+def _default_probability_pct(decision: dict[str, Any]) -> str:
+    raw = decision.get("default_probability", decision.get("default_probability_pct", 0))
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return "—"
+    if value <= 1.0:
+        value *= 100.0
+    return f"{value:.1f}%"
+
+
 # ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
@@ -206,67 +190,77 @@ def inject_explainability_styles() -> None:
     st.markdown(
         """
         <style>
-        .xai-card {
-            background: #161d27; border: 1px solid #243044;
-            border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 0.6rem;
-        }
-        .xai-card-header {
-            display: flex; align-items: center; justify-content: space-between;
-            margin-bottom: 0.65rem; gap: 0.5rem;
-        }
-        .xai-card-title {
-            font-size: 0.88rem; font-weight: 600; color: #e8edf5; margin: 0;
-        }
-        .xai-badge {
-            font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
-            letter-spacing: 0.06em; padding: 0.2rem 0.5rem; border-radius: 4px;
-            background: rgba(59,130,246,0.15); color: #60a5fa; white-space: nowrap;
-        }
-        .xai-fi-head {
-            display: flex; justify-content: space-between; color: #6b7c96;
-            font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
-            font-size: 0.62rem; padding-bottom: 0.35rem; margin-bottom: 0.15rem;
+        .xai-hero {
+            margin-bottom: 0.75rem; padding-bottom: 0.65rem;
             border-bottom: 1px solid #243044;
         }
-        .xai-fi-row {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 0.28rem 0; color: #c5d0e0; font-size: 0.78rem;
+        .xai-hero-eyebrow {
+            font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.12em; color: #3b82f6; margin: 0 0 0.3rem 0;
         }
-        .xai-fi-row span:first-child {
-            font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.72rem;
+        .xai-hero-title {
+            font-size: 1.5rem; font-weight: 700; color: #f1f5f9; margin: 0;
+            letter-spacing: -0.03em;
         }
-        .xai-fi-legend {
-            font-size: 0.64rem; color: #6b7c96; margin-top: 0.5rem;
-            display: flex; gap: 0.75rem; flex-wrap: wrap;
+        .xai-hero-sub {
+            font-size: 0.85rem; color: #8b9bb4; margin: 0.35rem 0 0 0; line-height: 1.45;
         }
-        .xai-fi-legend i {
-            display: inline-block; width: 7px; height: 7px;
-            border-radius: 2px; margin-right: 0.2rem;
+        .xai-applicant-line {
+            font-size: 0.78rem; color: #94a3b8; margin: 0.5rem 0 0.15rem 0;
         }
-        .xai-fi-row .impact-up { color: #f87171; font-weight: 600; }
-        .xai-fi-row .impact-down { color: #4ade80; font-weight: 600; }
-        .xai-assess-title { font-size: 1rem; font-weight: 700; margin: 0; }
-        .xai-assess-sub { font-size: 0.76rem; color: #94a3b8; margin: 0.25rem 0 0 0; }
+        .xai-card {
+            background: linear-gradient(145deg, #161d27 0%, #131a24 100%);
+            border: 1px solid #243044; border-radius: 10px;
+            padding: 0.75rem 0.9rem; margin-bottom: 0.5rem;
+        }
+        .xai-card-title {
+            font-size: 0.62rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.07em; color: #6b7c96; margin: 0;
+        }
+        .xai-card-value {
+            font-size: 1.35rem; font-weight: 700; color: #f1f5f9;
+            margin: 0.3rem 0 0 0; line-height: 1.1;
+        }
+        .xai-card-sub {
+            font-size: 0.68rem; color: #6b7c96; margin: 0.35rem 0 0 0;
+        }
+        .xai-badge-risk {
+            display: inline-block; font-size: 0.6rem; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.05em;
+            padding: 0.15rem 0.45rem; border-radius: 4px; margin-top: 0.35rem;
+        }
+        .xai-badge-low { background: rgba(34,197,94,0.15); color: #4ade80; }
+        .xai-badge-med { background: rgba(245,158,11,0.15); color: #fbbf24; }
+        .xai-badge-high { background: rgba(239,68,68,0.15); color: #f87171; }
+        .xai-badge-approve { background: rgba(34,197,94,0.12); color: #4ade80; }
+        .xai-badge-review { background: rgba(245,158,11,0.12); color: #fbbf24; }
+        .xai-badge-decline { background: rgba(239,68,68,0.12); color: #f87171; }
         .xai-summary-body {
-            font-size: 0.84rem; color: #c5d0e0; line-height: 1.55; margin: 0;
+            font-size: 0.82rem; color: #c5d0e0; line-height: 1.5; margin: 0.35rem 0 0 0;
         }
-        .xai-bullet {
-            font-size: 0.78rem; color: #d1dae8; padding: 0.3rem 0.5rem;
-            margin: 0 0 0.22rem 0; border-radius: 6px;
-            display: flex; justify-content: space-between; align-items: center;
+        .xai-driver-list { margin: 0.4rem 0 0 0; padding: 0; list-style: none; }
+        .xai-driver-list li {
+            font-size: 0.78rem; color: #d1dae8; padding: 0.28rem 0;
+            border-bottom: 1px solid #1e2a3a;
         }
-        .xai-bullet.risk { background: rgba(239,68,68,0.08); border-left: 2px solid #ef4444; }
-        .xai-bullet.pos { background: rgba(34,197,94,0.08); border-left: 2px solid #22c55e; }
-        .xai-bullet-impact { font-size: 0.7rem; font-weight: 600; }
-        .xai-bullet-impact.up { color: #f87171; }
-        .xai-bullet-impact.down { color: #4ade80; }
-        div[data-testid="stRadio"] > div[role="radiogroup"] {
-            gap: 0.35rem;
+        .xai-driver-list li:last-child { border-bottom: none; }
+        .xai-driver-list.risk li { border-left: 2px solid #ef4444; padding-left: 0.45rem; }
+        .xai-driver-list.pos li { border-left: 2px solid #22c55e; padding-left: 0.45rem; }
+        .xai-chart-panel {
+            background: #121820; border: 1px solid #243044; border-radius: 10px;
+            padding: 0.5rem 0.65rem 0.25rem; margin-bottom: 0.35rem;
         }
+        .xai-onboard {
+            background: linear-gradient(135deg, #121820 0%, #161d27 100%);
+            border: 1px solid #243044; border-radius: 10px;
+            padding: 1.5rem 1rem; text-align: center;
+        }
+        .xai-onboard h3 { color: #e8edf5; font-size: 1rem; margin: 0 0 0.4rem 0; }
+        .xai-onboard p { color: #8b9bb4; font-size: 0.82rem; margin: 0; line-height: 1.5; }
+        div[data-testid="stRadio"] > div[role="radiogroup"] { gap: 0.3rem; }
         div[data-testid="stRadio"] label {
-            background: #121820; border: 1px solid #243044;
-            border-radius: 8px; padding: 0.35rem 0.65rem !important;
-            font-size: 0.78rem;
+            background: #121820; border: 1px solid #243044; border-radius: 8px;
+            padding: 0.3rem 0.55rem !important; font-size: 0.76rem;
         }
         div[data-testid="stRadio"] label[data-checked="true"] {
             border-color: #3b82f6; background: rgba(59,130,246,0.12);
@@ -277,123 +271,159 @@ def inject_explainability_styles() -> None:
     )
 
 
-def render_global_feature_importance_card() -> None:
-    importance = load_global_importance()
-    top10 = importance.head(10)
-    data_source = str(top10["source"].iloc[0]) if not top10.empty else "global_shap"
-    badge = "Portfolio SHAP" if data_source == "global_shap" else "Model gain"
+def render_shap_contribution_chart(contributions: pd.DataFrame) -> None:
+    frame = contributions.head(10).copy()
+    frame["label"] = frame["feature"].map(lambda f: _feature_label(str(f)))
+    frame["direction"] = np.where(frame["impact"] > 0, "Increases risk", "Decreases risk")
 
-    rows = []
-    for row in top10.itertuples():
-        impact = float(row.display_impact)
-        css = "impact-up" if impact > 0 else "impact-down"
-        sign = "+" if impact >= 0 else ""
-        rows.append(
-            f'<div class="xai-fi-row"><span>{row.feature}</span>'
-            f'<span class="{css}">{sign}{impact:.2f}</span></div>'
+    st.markdown('<p class="xai-card-title" style="margin:0 0 0.35rem 0.15rem;">SHAP Feature Contribution</p>', unsafe_allow_html=True)
+    try:
+        chart = (
+            alt.Chart(frame)
+            .mark_bar(cornerRadiusEnd=3)
+            .encode(
+                y=alt.Y(
+                    "label:N",
+                    sort=alt.EncodingSortField(field="abs_impact", order="descending"),
+                    title=None,
+                    axis=alt.Axis(labelLimit=240, labelFontSize=11),
+                ),
+                x=alt.X("impact:Q", title="Contribution to default risk"),
+                color=alt.Color(
+                    "direction:N",
+                    scale=alt.Scale(
+                        domain=["Increases risk", "Decreases risk"],
+                        range=["#f87171", "#4ade80"],
+                    ),
+                    legend=alt.Legend(title=None, orient="top", labelFontSize=11),
+                ),
+                tooltip=[
+                    alt.Tooltip("label:N", title="Feature"),
+                    alt.Tooltip("impact:Q", title="SHAP", format=".3f"),
+                ],
+            )
+            .properties(
+                height=300,
+                padding={"left": 8, "right": 12, "top": 4, "bottom": 8},
+            )
         )
-
-    st.markdown(
-        f"""
-        <div class="xai-card">
-            <div class="xai-card-header">
-                <p class="xai-card-title">Global Feature Importance</p>
-                <span class="xai-badge">{badge}</span>
-            </div>
-            <div class="xai-fi-head"><span>Feature</span><span>Impact</span></div>
-            {''.join(rows)}
-            <div class="xai-fi-legend">
-                <span><i style="background:#f87171;"></i>Increases default risk</span>
-                <span><i style="background:#4ade80;"></i>Lowers default risk</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        st.altair_chart(chart.configure(background="transparent"), use_container_width=True)
+    except Exception:
+        st.bar_chart(frame.set_index("label")[["impact"]], height=260)
 
 
-def render_assessment_summary_card(decision: dict[str, Any]) -> None:
+def render_metrics_row(decision: dict[str, Any]) -> None:
     band = str(decision.get("risk_band", "MEDIUM")).upper()
     color = BAND_COLORS.get(band, "#f59e0b")
     score = decision.get("risk_score", "—")
-    default_pct = decision.get("default_probability", "—")
-    rec = RECOMMENDATION_LABEL.get(
-        str(decision.get("recommendation", "")).upper(),
-        str(decision.get("model_decision", "—")),
-    )
+    default_pct = _default_probability_pct(decision)
+    rec_key = str(decision.get("recommendation", decision.get("model_decision", ""))).upper()
+    rec_label = RECOMMENDATION_LABEL.get(rec_key, rec_key.title() if rec_key else "—")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown(
+            f"""
+            <div class="xai-card">
+                <p class="xai-card-title">Risk Score</p>
+                <p class="xai-card-value" style="color:{color};">{score}</p>
+                <span class="xai-badge-risk {_badge_class_risk(band)}">{band} Risk</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with c2:
+        st.markdown(
+            f"""
+            <div class="xai-card">
+                <p class="xai-card-title">Recommendation</p>
+                <p class="xai-card-value" style="font-size:1.1rem;">{rec_label}</p>
+                <span class="xai-badge-risk {_badge_class_rec(rec_key)}">{rec_label}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with c3:
+        st.markdown(
+            f"""
+            <div class="xai-card">
+                <p class="xai-card-title">Default Probability</p>
+                <p class="xai-card-value">{default_pct}</p>
+                <p class="xai-card-sub">Model-estimated default likelihood</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_driver_lists(risk_drivers: list[str], positive_factors: list[str]) -> None:
+    risk_items = "".join(f"<li>{title}</li>" for title in risk_drivers) or "<li>None identified</li>"
+    pos_items = "".join(f"<li>{title}</li>" for title in positive_factors) or "<li>None identified</li>"
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(
+            f"""
+            <div class="xai-card">
+                <p class="xai-card-title">Risk Drivers</p>
+                <ul class="xai-driver-list risk">{risk_items}</ul>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with c2:
+        st.markdown(
+            f"""
+            <div class="xai-card">
+                <p class="xai-card-title">Positive Factors</p>
+                <ul class="xai-driver-list pos">{pos_items}</ul>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_ai_summary(text: str) -> None:
     st.markdown(
         f"""
         <div class="xai-card">
-            <div class="xai-card-header">
-                <p class="xai-card-title">Assessment Summary</p>
-            </div>
-            <p class="xai-assess-title" style="color:{color};">{band} Risk · Score {score}</p>
-            <p class="xai-assess-sub">Default probability {default_pct}% · Recommendation: {rec}</p>
+            <p class="xai-card-title">AI Summary</p>
+            <p class="xai-summary-body">{text}</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-def _inline_bold(text: str) -> str:
-    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
-
-
-def render_ai_summary_card(summary_md: str) -> None:
-    body = _inline_bold(summary_md)
+def render_empty_explain_state(*, latest_mode: bool) -> None:
     st.markdown(
-        f"""
-        <div class="xai-card">
-            <div class="xai-card-header">
-                <p class="xai-card-title">AI Summary</p>
-            </div>
-            <p class="xai-summary-body">{body}</p>
+        """
+        <div class="xai-onboard">
+            <h3>No applicant selected</h3>
+            <p>Run a credit assessment or explain a custom applicant profile.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    if latest_mode:
+        from app_navigation import navigate_to_explainability_latest
 
+        if st.button("Open latest assessment", type="secondary"):
+            navigate_to_explainability_latest()
+            st.rerun()
+    elif st.button("Run Credit Assessment", type="secondary"):
+        from app_navigation import request_page
 
-def render_factor_card(title: str, items: list[dict], *, risk: bool) -> None:
-    if not items:
-        bullets = '<p class="xai-assess-sub" style="margin:0;">No factors identified.</p>'
-    else:
-        parts = []
-        for item in items:
-            css = "risk" if risk else "pos"
-            icss = "up" if risk else "down"
-            sign = "+" if risk else ""
-            parts.append(
-                f'<div class="xai-bullet {css}"><span>{item["title"]}</span>'
-                f'<span class="xai-bullet-impact {icss}">{sign}{item["impact"]:.2f}</span></div>'
-            )
-        bullets = "".join(parts)
-
-    st.markdown(
-        f"""
-        <div class="xai-card">
-            <div class="xai-card-header">
-                <p class="xai-card-title">{title}</p>
-            </div>
-            {bullets}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        request_page("risk_prediction")
+        st.rerun()
 
 
 def render_mode_selector() -> str:
     _init_explainability_mode()
     has_latest = _has_latest_assessment()
-
-    options = (
-        [EXPLAIN_MODE_LATEST, EXPLAIN_MODE_CUSTOM]
-        if has_latest
-        else [EXPLAIN_MODE_CUSTOM]
-    )
+    options = [EXPLAIN_MODE_LATEST, EXPLAIN_MODE_CUSTOM] if has_latest else [EXPLAIN_MODE_CUSTOM]
     if st.session_state.explainability_mode not in options:
         st.session_state.explainability_mode = options[0]
-
     return st.radio(
         "Explanation source",
         options=options,
@@ -403,19 +433,22 @@ def render_mode_selector() -> str:
     )
 
 
-def _resolve_applicant_context(mode: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def _resolve_applicant_context(
+    mode: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
     if mode == EXPLAIN_MODE_LATEST:
         if not _has_latest_assessment():
-            return None, None
+            return None, None, None
+        latest = get_latest_assessment()
         return (
             dict(st.session_state["last_applicant_payload"]),
             dict(st.session_state["risk_result"]),
+            latest,
         )
-
     payload = st.session_state.get("custom_explain_payload")
     if payload:
-        return dict(payload), None
-    return None, None
+        return dict(payload), None, None
+    return None, None, None
 
 
 def render_custom_applicant_form() -> None:
@@ -483,7 +516,7 @@ def _estimate_decision_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def render_individual_column() -> None:
+def render_explainability_content() -> None:
     mode = render_mode_selector()
 
     if mode == EXPLAIN_MODE_LATEST:
@@ -491,10 +524,9 @@ def render_individual_column() -> None:
     else:
         render_custom_applicant_form()
 
-    payload, decision = _resolve_applicant_context(mode)
+    payload, decision, latest_meta = _resolve_applicant_context(mode)
     if not payload:
-        if mode == EXPLAIN_MODE_LATEST:
-            st.caption("No assessment available yet.")
+        render_empty_explain_state(latest_mode=(mode == EXPLAIN_MODE_LATEST))
         return
 
     try:
@@ -506,36 +538,43 @@ def render_individual_column() -> None:
     if decision is None:
         decision = _estimate_decision_from_payload(payload)
 
-    risk_drivers, positive_factors = split_drivers(contributions, payload)
-    summary = build_business_summary(
+    if mode == EXPLAIN_MODE_LATEST and latest_meta:
+        name = latest_meta.get("applicant_name", "—")
+        app_id = latest_meta.get("applicant_id", "—")
+        st.markdown(
+            f'<p class="xai-applicant-line">Applicant: <strong>{name}</strong> · ID {app_id}</p>',
+            unsafe_allow_html=True,
+        )
+
+    render_metrics_row(decision)
+
+    risk_titles, positive_titles = split_drivers(contributions, payload)
+    summary = build_concise_summary(
         str(decision.get("risk_band", "MEDIUM")),
-        risk_drivers,
-        positive_factors,
+        risk_titles,
+        positive_titles,
     )
+    render_ai_summary(summary)
+    render_driver_lists(risk_titles, positive_titles)
 
-    render_assessment_summary_card(decision)
-    render_ai_summary_card(summary)
-
-    driver_cols = st.columns(2, gap="small")
-    with driver_cols[0]:
-        render_factor_card("Risk Drivers", risk_drivers, risk=True)
-    with driver_cols[1]:
-        render_factor_card("Positive Factors", positive_factors, risk=False)
+    st.markdown('<div class="xai-chart-panel">', unsafe_allow_html=True)
+    render_shap_contribution_chart(contributions)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_explainability_page(page_header_fn: Callable[..., None]) -> None:
+    del page_header_fn
     inject_explainability_styles()
 
-    page_header_fn(
-        "Explainability",
-        "Portfolio drivers and applicant-level factors behind each credit decision.",
-        badge="XAI",
+    st.markdown(
+        """
+        <div class="xai-hero">
+            <p class="xai-hero-eyebrow">Enterprise Risk Platform</p>
+            <h1 class="xai-hero-title">Explainability</h1>
+            <p class="xai-hero-sub">Local SHAP drivers and underwriting context for the selected applicant.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    left_col, right_col = st.columns((2, 3), gap="medium")
-
-    with left_col:
-        render_global_feature_importance_card()
-
-    with right_col:
-        render_individual_column()
+    render_explainability_content()

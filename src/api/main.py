@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from src.api.dashboard_summary import build_dashboard_summary
 from src.data.preprocessor import PreprocessingError
 from src.ml.predict import predict_applicant
 from src.ml.rules import build_decision, list_active_rules
@@ -71,3 +72,20 @@ def decision(request: ApplicantRequest) -> dict[str, Any]:
 @app.get("/rules")
 def rules_catalog() -> dict[str, Any]:
     return {"active_rule_count": len(list_active_rules()), "rules": list_active_rules()}
+
+
+@app.get("/dashboard/summary")
+def dashboard_summary(refresh: bool = False) -> dict[str, Any]:
+    """Executive dashboard metrics from portfolio scoring and SHAP artifacts."""
+    try:
+        if refresh:
+            from src.ml.portfolio_analytics import clear_portfolio_cache, get_portfolio_analytics
+
+            clear_portfolio_cache()
+            get_portfolio_analytics(force_refresh=True)
+        return build_dashboard_summary()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Dashboard summary error")
+        raise HTTPException(status_code=500, detail="Dashboard summary failed.") from exc

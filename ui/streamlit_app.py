@@ -18,6 +18,7 @@ import streamlit as st
 
 APP_TITLE = "CreditIQ"
 APP_SUBTITLE = "Enterprise Risk Platform"
+APP_EYEBROW = "Enterprise Risk Platform"
 APP_VERSION = "v0.1.0-shell"
 
 # ---------------------------------------------------------------------------
@@ -30,9 +31,18 @@ NAV_ITEMS: list[tuple[str, str, str]] = [
     ("risk_prediction", "Risk Prediction", "🎯"),
     ("explainability", "Explainability", "🔍"),
     ("decision_rules", "Decision Rules", "⚖️"),
-    ("talk_to_data", "Talk To Data", "💬"),
-    ("reports", "Reports", "📑"),
+    ("talk_to_data", "AI Data Analyst", "💬"),
 ]
+
+NAV_GROUPS: list[tuple[str | None, list[str]]] = [
+    (None, ["dashboard", "data_explorer"]),
+    ("Credit Decisions", ["risk_prediction", "explainability", "decision_rules"]),
+    ("Intelligence", ["talk_to_data"]),
+]
+
+NAV_BY_ID: dict[str, tuple[str, str]] = {
+    page_id: (label, icon) for page_id, label, icon in NAV_ITEMS
+}
 
 PAGE_RENDERERS: dict[str, Callable[[], None]] = {}
 
@@ -80,17 +90,108 @@ def inject_theme() -> None:
             font-family: 'DM Sans', sans-serif;
         }
 
+        /* Remove Streamlit top chrome gap; keep a small safe inset only */
+        header[data-testid="stHeader"],
+        [data-testid="stHeader"] {
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            max-height: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border: none !important;
+            overflow: hidden !important;
+        }
+
+        [data-testid="stToolbar"],
+        [data-testid="stDecoration"] {
+            display: none !important;
+        }
+
+        [data-testid="stAppViewContainer"] {
+            top: 0 !important;
+        }
+
+        [data-testid="stAppViewContainer"] > section.main,
+        section[data-testid="stMain"],
+        section.main {
+            padding-top: 0 !important;
+            margin-top: 0 !important;
+        }
+
+        section.main > div.block-container,
+        [data-testid="stMainBlockContainer"],
+        .main .block-container {
+            padding-top: 0.35rem !important;
+            padding-bottom: 1.25rem !important;
+            padding-left: 1.5rem !important;
+            padding-right: 1.5rem !important;
+            max-width: 100%;
+        }
+
+        /* No extra gap above the first widget / hero on each page */
+        section.main [data-testid="stVerticalBlock"]:first-of-type {
+            padding-top: 0 !important;
+            gap: 0.35rem !important;
+        }
+
+        section.main [data-testid="stVerticalBlock"] > div:first-child {
+            padding-top: 0 !important;
+        }
+
+        section.main .element-container:first-of-type {
+            margin-top: 0 !important;
+        }
+
+        section.main [data-testid="stMarkdownContainer"]:first-of-type {
+            margin-top: 0 !important;
+        }
+
+        /* Sidebar — stable width; hide native collapse chrome that breaks custom nav */
         [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #0d1219 0%, #0a0e14 100%);
-            border-right: 1px solid var(--border);
+            background: linear-gradient(180deg, #0c1018 0%, #080b10 100%) !important;
+            border-right: 1px solid #1a2433;
+            width: 16.5rem !important;
+            min-width: 16.5rem !important;
+            max-width: 16.5rem !important;
+        }
+
+        [data-testid="stSidebar"] > div:first-child {
+            background: transparent;
+            padding-top: 0.35rem !important;
         }
 
         [data-testid="stSidebar"] .block-container {
-            padding-top: 1.25rem;
+            padding: 0.35rem 0.75rem 1rem !important;
         }
 
-        [data-testid="stHeader"] {
-            background: transparent;
+        [data-testid="stSidebar"] [data-testid="stVerticalBlock"]:first-of-type {
+            padding-top: 0 !important;
+        }
+
+        [data-testid="stSidebarHeader"],
+        [data-testid="stSidebarCollapseButton"],
+        [data-testid="collapsedControl"],
+        button[kind="header"] {
+            display: none !important;
+        }
+
+        /* Collapsed st.radio labels sometimes leak widget key names as visible "key" */
+        .stRadio > label[data-testid="stWidgetLabel"],
+        [data-testid="stRadio"] > label {
+            display: none !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+        }
+
+        /* Page hero blocks — align with sidebar top; minimal safe spacing */
+        .dash-hero, .de-hero, .tda-hero, .xai-hero {
+            margin-top: 0 !important;
+            margin-bottom: 0.6rem !important;
+            padding-top: 0 !important;
+            padding-bottom: 0.5rem !important;
         }
 
         h1, h2, h3, h4, p, label, span {
@@ -101,9 +202,21 @@ def inject_theme() -> None:
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
 
-        /* Brand block */
+        /* Sidebar brand */
+        .sidebar-brand {
+            padding: 0.05rem 0.2rem 0.65rem;
+            border-bottom: 1px solid #1e2a3a;
+            margin-bottom: 0.55rem;
+        }
+        .sidebar-logo {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 2rem; height: 2rem; border-radius: 8px;
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            font-size: 1rem; margin-bottom: 0.55rem;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+        }
         .brand-title {
-            font-size: 1.35rem;
+            font-size: 1.2rem;
             font-weight: 700;
             color: var(--text);
             letter-spacing: -0.02em;
@@ -111,14 +224,61 @@ def inject_theme() -> None:
             line-height: 1.2;
         }
         .brand-sub {
-            font-size: 0.72rem;
+            font-size: 0.68rem;
             color: var(--text-muted);
-            margin: 0.15rem 0 0 0;
+            margin: 0.2rem 0 0 0;
             text-transform: uppercase;
-            letter-spacing: 0.08em;
+            letter-spacing: 0.07em;
         }
         .brand-accent {
             color: var(--accent);
+        }
+        .nav-section {
+            font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.1em; color: #4a5d78;
+            margin: 0.85rem 0 0.35rem 0.35rem;
+            padding: 0;
+        }
+        .nav-section:first-of-type { margin-top: 0.05rem; }
+
+        [data-testid="stSidebar"] .stButton {
+            margin-bottom: 0.15rem;
+        }
+        [data-testid="stSidebar"] .stButton > button {
+            width: 100%;
+            justify-content: flex-start;
+            text-align: left;
+            font-size: 0.82rem;
+            font-weight: 500;
+            padding: 0.5rem 0.65rem 0.5rem 0.75rem;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #94a3b8;
+            box-shadow: none;
+            transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        [data-testid="stSidebar"] .stButton > button:hover {
+            background: rgba(59, 130, 246, 0.08);
+            color: #e8edf5;
+            border-color: #243044;
+        }
+        [data-testid="stSidebar"] .stButton > button[kind="primary"],
+        [data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"] {
+            background: rgba(59, 130, 246, 0.14) !important;
+            color: #f1f5f9 !important;
+            border-color: rgba(59, 130, 246, 0.35) !important;
+            border-left: 3px solid #3b82f6 !important;
+            padding-left: 0.6rem !important;
+            font-weight: 600;
+        }
+        [data-testid="stSidebar"] .stButton > button:focus:not(:active) {
+            border-color: transparent;
+            color: #94a3b8;
+        }
+        [data-testid="stSidebar"] .stButton > button[kind="primary"]:focus {
+            border-color: rgba(59, 130, 246, 0.35) !important;
+            color: #f1f5f9 !important;
         }
 
         /* Page header */
@@ -225,13 +385,89 @@ def inject_theme() -> None:
             margin-bottom: 1rem;
         }
 
-        /* Nav hint in sidebar */
+        /* Sidebar footer + signed-in user */
         .nav-footer {
-            font-size: 0.7rem;
+            font-size: 0.62rem;
             color: #5c6b82;
-            margin-top: 2rem;
-            padding-top: 1rem;
-            border-top: 1px solid var(--border);
+            margin-top: 1.25rem;
+            padding: 0.65rem 0.35rem 0;
+            border-top: 1px solid #1e2a3a;
+            line-height: 1.45;
+        }
+
+        .sidebar-user-footer {
+            margin-top: 0.85rem;
+            padding: 0.7rem 0.75rem;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+        }
+        .sidebar-user-row {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+        }
+        .sidebar-user-avatar {
+            flex-shrink: 0;
+            width: 2.25rem;
+            height: 2.25rem;
+            border-radius: 50%;
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-size: 0.95rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+        .sidebar-user-meta {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 0.12rem;
+        }
+        .sidebar-user-name {
+            display: block;
+            font-size: 0.84rem;
+            font-weight: 600;
+            color: var(--text);
+            line-height: 1.25;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .sidebar-user-id {
+            display: block;
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        [data-testid="stSidebar"] button[data-testid="baseButton-auth_sign_out"] {
+            margin-top: 0.5rem !important;
+            min-height: 2rem !important;
+            font-size: 0.78rem !important;
+        }
+        .nav-footer strong {
+            color: #8b9bb4;
+            font-weight: 600;
+        }
+        .nav-model-pill {
+            display: inline-block;
+            margin-top: 0.35rem;
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            background: rgba(34, 197, 94, 0.1);
+            color: #4ade80;
+            font-size: 0.58rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
         }
 
         /* Streamlit widget tuning */
@@ -257,8 +493,11 @@ def render_brand_block() -> None:
     """Sidebar brand header."""
     st.markdown(
         f"""
-        <p class="brand-title"><span class="brand-accent">Credit</span>IQ</p>
-        <p class="brand-sub">{APP_SUBTITLE}</p>
+        <div class="sidebar-brand">
+            <div class="sidebar-logo">🏦</div>
+            <p class="brand-title"><span class="brand-accent">Credit</span>IQ</p>
+            <p class="brand-sub">{APP_SUBTITLE}</p>
+        </div>
         """,
         unsafe_allow_html=True,
     )
@@ -353,178 +592,22 @@ def page_shell(
 
 
 # ---------------------------------------------------------------------------
-# Placeholder data
-# ---------------------------------------------------------------------------
-
-
-def _dashboard_kpis() -> list[dict[str, str]]:
-    return [
-        {
-            "label": "Total Applications",
-            "value": "48,291",
-            "delta": "▲ +12.4% vs last month",
-            "delta_tone": "positive",
-            "icon": "📋",
-        },
-        {
-            "label": "Default Rate",
-            "value": "8.3%",
-            "delta": "▼ 1.1% improvement",
-            "delta_tone": "positive",
-            "icon": "⚠️",
-        },
-        {
-            "label": "Approval Rate",
-            "value": "67.2%",
-            "delta": "▲ +2.8% vs last month",
-            "delta_tone": "positive",
-            "icon": "✅",
-        },
-        {
-            "label": "High Risk Queue",
-            "value": "3,842",
-            "delta": "▲ +3.1% needs attention",
-            "delta_tone": "negative",
-            "icon": "🔴",
-        },
-    ]
-
-
-def _monthly_applications_df() -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "Month": ["Jan", "Feb", "Mar", "Apr", "May"],
-            "Applications": [8200, 7400, 9100, 6800, 8500],
-            "Defaults": [902, 666, 728, 544, 680],
-        }
-    )
-
-
-def _risk_band_distribution() -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "Band": ["Low", "Medium", "High"],
-            "Share": [67, 25, 8],
-        }
-    ).set_index("Band")
-
-
-def _recent_applications_df() -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {
-                "Applicant": "Priya Nair",
-                "ID": "SK-100291",
-                "Loan Amount": "₹3,50,000",
-                "Income": "₹72,000/mo",
-                "Ext Score": 0.74,
-                "Risk Score": 22,
-                "Band": "High",
-            },
-            {
-                "Applicant": "Rahul Menon",
-                "ID": "SK-100290",
-                "Loan Amount": "₹8,00,000",
-                "Income": "₹1,40,000/mo",
-                "Ext Score": 0.61,
-                "Risk Score": 58,
-                "Band": "Medium",
-            },
-            {
-                "Applicant": "Anjali Krishnan",
-                "ID": "SK-100289",
-                "Loan Amount": "₹5,20,000",
-                "Income": "₹95,000/mo",
-                "Ext Score": 0.82,
-                "Risk Score": 81,
-                "Band": "Low",
-            },
-            {
-                "Applicant": "Vikram Iyer",
-                "ID": "SK-100288",
-                "Loan Amount": "₹12,00,000",
-                "Income": "₹2,10,000/mo",
-                "Ext Score": 0.68,
-                "Risk Score": 45,
-                "Band": "Medium",
-            },
-            {
-                "Applicant": "Deepa Suresh",
-                "ID": "SK-100287",
-                "Loan Amount": "₹2,75,000",
-                "Income": "₹55,000/mo",
-                "Ext Score": 0.79,
-                "Risk Score": 74,
-                "Band": "Low",
-            },
-        ]
-    )
-
-
-# ---------------------------------------------------------------------------
 # Page renderers
 # ---------------------------------------------------------------------------
 
 
 @register_page("dashboard")
 def render_dashboard() -> None:
-    page_header(
-        "Executive Dashboard",
-        "Portfolio overview, default trends, and recent application activity.",
-        badge="Overview",
-    )
+    from dashboard_page import render_executive_dashboard
 
-    kpi_row(_dashboard_kpis(), columns=4)
-
-    st.markdown("<div style='height: 1rem'></div>", unsafe_allow_html=True)
-
-    chart_left, chart_right = st.columns((3, 2), gap="large")
-
-    with chart_left:
-        panel_section(
-            "Monthly Applications & Defaults",
-            "Placeholder trend — will connect to portfolio analytics.",
-        )
-        monthly = _monthly_applications_df()
-        st.bar_chart(monthly.set_index("Month")[["Applications", "Defaults"]], height=280)
-
-    with chart_right:
-        panel_section(
-            "Risk Band Distribution",
-            "Placeholder mix — will reflect live model scoring.",
-        )
-        st.bar_chart(_risk_band_distribution(), height=280)
-        st.caption("Low 67% · Medium 25% · High 8%")
-
-    st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
-
-    panel_section(
-        "Recent Applications",
-        "Sample queue — will sync with inference API.",
-    )
-    table_col, action_col = st.columns((5, 1))
-    with table_col:
-        st.dataframe(
-            _recent_applications_df(),
-            use_container_width=True,
-            hide_index=True,
-            height=220,
-        )
-    with action_col:
-        st.markdown("<div style='height: 2.2rem'></div>", unsafe_allow_html=True)
-        st.button("View all", use_container_width=True, disabled=True)
-        st.caption("48,291 total")
+    render_executive_dashboard(page_header)
 
 
 @register_page("data_explorer")
 def render_data_explorer() -> None:
-    page_shell(
-        "Data Explorer",
-        "Browse, filter, and profile the Home Credit application dataset.",
-        badge="Data",
-    )
-    st.markdown("##### Dataset catalog")
-    st.info("Dataset tables, column profiles, and filters will appear here.")
+    from data_explorer_page import render_data_explorer_page
+
+    render_data_explorer_page(page_header)
 
 
 @register_page("risk_prediction")
@@ -550,32 +633,9 @@ def render_decision_rules() -> None:
 
 @register_page("talk_to_data")
 def render_talk_to_data() -> None:
-    page_shell(
-        "Talk To Data",
-        "Natural-language queries over portfolio and application data.",
-        badge="AI",
-    )
-    st.chat_input("Ask about defaults, regions, or segments…", disabled=True)
+    from talk_to_data import render_talk_to_data_page
 
-
-@register_page("reports")
-def render_reports() -> None:
-    page_shell(
-        "Reports",
-        "Exportable summaries for risk committees and regulatory review.",
-        badge="Intelligence",
-    )
-    st.markdown("##### Report library")
-    report_cols = st.columns(3)
-    for col, title in zip(
-        report_cols,
-        ["Monthly Risk Summary", "Default Trend Pack", "Model Performance"],
-    ):
-        with col:
-            with st.container(border=True):
-                st.markdown(f"**{title}**")
-                st.caption("PDF / CSV export — coming soon")
-                st.button("Generate", key=title, disabled=True, use_container_width=True)
+    render_talk_to_data_page(page_header)
 
 
 # ---------------------------------------------------------------------------
@@ -587,54 +647,46 @@ def render_sidebar() -> str:
     """Build sidebar navigation and return selected page id."""
     from app_navigation import apply_pending_navigation
 
-    labels = [f"{icon}  {label}" for _, label, icon in NAV_ITEMS]
     ids = [page_id for page_id, _, _ in NAV_ITEMS]
+    if "main_nav" not in st.session_state:
+        st.session_state.main_nav = "dashboard"
 
-    # Apply queued navigation before any widget with key="main_nav" is created.
     apply_pending_navigation(ids)
 
     with st.sidebar:
         render_brand_block()
-        st.markdown("<div style='height: 1.25rem'></div>", unsafe_allow_html=True)
 
-        st.markdown(
-            '<p style="font-size:0.68rem;font-weight:600;text-transform:uppercase;'
-            'letter-spacing:0.08em;color:#5c6b82;margin:0 0 0.5rem 0;">Navigation</p>',
-            unsafe_allow_html=True,
-        )
-
-        choice = st.radio(
-            "Pages",
-            options=ids,
-            format_func=lambda pid: labels[ids.index(pid)],
-            label_visibility="collapsed",
-            key="main_nav",
-        )
+        for group_name, group_ids in NAV_GROUPS:
+            if group_name:
+                st.markdown(f'<p class="nav-section">{group_name}</p>', unsafe_allow_html=True)
+            for page_id in group_ids:
+                label, _icon = NAV_BY_ID[page_id]
+                is_active = st.session_state.main_nav == page_id
+                if st.button(
+                    label,
+                    key=f"nav_btn_{page_id}",
+                    use_container_width=True,
+                    type="primary" if is_active else "secondary",
+                ):
+                    st.session_state.main_nav = page_id
+                    st.rerun()
 
         st.markdown(
             f"""
             <div class="nav-footer">
-                {APP_VERSION}<br/>
-                LightGBM · ROC-AUC 0.75<br/>
-                Shell — no API calls
+                <strong>Model</strong> LightGBM · AUC 0.75
+                <span class="nav-model-pill">PRODUCTION</span><br/>
+                {APP_VERSION}
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        return choice
+        from login_page import render_sidebar_user_block
 
+        render_sidebar_user_block()
 
-def render_top_bar() -> None:
-    """Lightweight header row above page content."""
-    left, right = st.columns((4, 1))
-    with right:
-        st.text_input(
-            "Search",
-            placeholder="Search applicants…",
-            label_visibility="collapsed",
-            disabled=True,
-        )
+        return str(st.session_state.main_nav)
 
 
 # ---------------------------------------------------------------------------
@@ -651,8 +703,14 @@ def main() -> None:
     )
 
     inject_theme()
+
+    from login_page import is_authenticated, render_login_page
+
+    if not is_authenticated():
+        render_login_page()
+        return
+
     page_id = render_sidebar()
-    render_top_bar()
 
     renderer = PAGE_RENDERERS.get(page_id, render_dashboard)
     renderer()

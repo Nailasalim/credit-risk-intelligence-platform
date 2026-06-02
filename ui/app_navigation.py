@@ -1,9 +1,8 @@
 """
 Cross-page Streamlit navigation via session_state.
 
-Streamlit does not allow assigning st.session_state.main_nav after the sidebar
-radio (key="main_nav") is drawn. Use request_page() + apply_pending_navigation()
-instead.
+Use request_page() + apply_pending_navigation() to change pages before the
+sidebar navigation buttons are drawn.
 """
 
 from __future__ import annotations
@@ -25,9 +24,9 @@ def request_page(page_id: str) -> None:
 
 def apply_pending_navigation(valid_page_ids: list[str]) -> None:
     """
-    Apply a queued navigation request by setting main_nav before st.radio runs.
+    Apply a queued navigation request by setting main_nav.
 
-    Call this at the start of render_sidebar(), prior to instantiating the widget.
+    Call this at the start of render_sidebar(), before nav buttons render.
     """
     pending = st.session_state.pop(PENDING_PAGE_KEY, None)
     if pending and pending in valid_page_ids:

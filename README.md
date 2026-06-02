@@ -1,197 +1,384 @@
-# CreditIQ — AI Credit Risk Intelligence Platform
+# CreditIQ – AI-Powered Credit Risk Underwriting Platform
 
-Enterprise-style credit risk assessment platform built on the Home Credit Default Risk dataset. Combines a LightGBM default model, SHAP-based explainability, and a structured decision-rules engine behind a FastAPI backend and Streamlit dashboard.
+CreditIQ is an end-to-end credit risk intelligence workspace built on the **Home Credit Default Risk** dataset. It helps analysts and underwriters move from raw application data to scored decisions, explanations, and portfolio insight in one place.
 
-**Author:** [Nailasalim](https://github.com/Nailasalim)  
-**Status:** Phase 1 checkpoint — inference, explainability, and decision rules operational
+Traditional underwriting is often **slow**, **inconsistent**, and **hard to explain** to business and compliance stakeholders. This platform combines:
 
----
+- **Machine learning** — default probability and risk bands  
+- **Explainable AI** — SHAP-based drivers at portfolio and applicant level  
+- **Business rules** — transparent approve / review / decline policies  
+- **Portfolio analytics** — executive KPIs and segment views  
+- **Natural language data analysis** — ask portfolio questions in plain English  
 
-## Project Overview
+…to support faster, more explainable credit decision-making.
 
-CreditIQ predicts applicant default probability, assigns risk bands, and recommends approve / review / decline outcomes. Underwriters can inspect global and applicant-level drivers, browse portfolio-derived policy rules, and see which rules fire for a given application.
+| | |
+|---|---|
+| **Dataset** | Home Credit Default Risk |
+| **Records** | 307,511 applications |
+| **Target** | Loan default prediction (`TARGET`) |
+| **Model** | LightGBM |
+| **Explainability** | SHAP (global + local) |
+| **Frontend** | Streamlit |
+| **Backend** | Python + FastAPI |
 
-The stack separates **model inference** (FastAPI) from **presentation** (Streamlit), so the same backend can serve multiple clients.
-
----
-
-## Problem Statement
-
-Home Credit serves a large, imbalanced portfolio (~8% default rate). Manual underwriting does not scale, and black-box scores alone are insufficient for regulated credit decisions.
-
-This project addresses:
-
-- **Default prediction** — probability of non-repayment at the portfolio-tuned threshold (0.67)
-- **Transparent decisions** — risk bands, confidence, and rule-level explanations
-- **Explainability** — SHAP-based feature drivers at portfolio and applicant level
-- **Policy alignment** — business rules derived from model behaviour and portfolio patterns
+**Author:** [Nailasalim](https://github.com/Nailasalim)
 
 ---
 
-## Features Implemented
+## Features
 
-| Area | Status | Description |
-|------|--------|-------------|
-| **Risk Prediction** | ✅ | Applicant form → `POST /decision` → score, band, recommendation |
-| **Explainability** | ✅ | Global SHAP importance; individual prediction contributions |
-| **Decision Rules** | ✅ | 7 structured rules (R001–R007), live evaluation, mined metrics |
-| **FastAPI backend** | ✅ | `/health`, `/predict`, `/decision`, `/rules` |
-| **Dashboard shell** | 🔶 | NeoStats-style dark UI; Dashboard, Data Explorer, Talk To Data, Reports are placeholders |
+Only capabilities that are implemented and available in the app today.
 
-### Model performance (Phase 1)
+### Executive Dashboard
+
+- Portfolio KPIs (applications, default rate, approval rate, high-risk exposure)  
+- Portfolio analytics: risk distribution, approval decision mix, predicted default probability bands, risk segment volume  
+- Top risk and positive SHAP drivers  
+- Recent session assessments from Risk Prediction  
+
+### Data Explorer
+
+- Dataset overview and KPIs  
+- Demographics (age, gender, employment tenure)  
+- Financial analysis (income, credit, annuity, scatter views)  
+- Risk segmentation and highlights  
+- Data quality assessment  
+- Interactive Plotly charts with sidebar filters  
+
+### Risk Prediction
+
+- Applicant scoring via FastAPI  
+- Probability of default and risk score (0–100)  
+- Risk band assignment (Low / Medium / High)  
+- Approve / Review / Decline recommendation  
+- Session assessment history on the dashboard  
+
+### Explainability
+
+- SHAP-based local explanations per applicant  
+- Global feature importance (mean \|SHAP\|)  
+- Top drivers and contribution chart  
+- Concise AI-style narrative summary  
+
+### Decision Rules
+
+- Underwriting rules engine (structured rule catalog)  
+- Live rule matching on applicant payloads  
+- Human-readable conditions and rule reasons  
+- Confidence, coverage, precision, and lift metrics  
+
+### AI Data Analyst
+
+- Natural language → SQL (deterministic intent matching)  
+- Portfolio analytics queries (rates, counts, segments, summaries)  
+- Query results as tables  
+- Short business insights per answer  
+- In-memory **SQLite** over the training data and portfolio KPIs  
+
+### Login & navigation
+
+- Session-based login (demo accounts)  
+- Dark enterprise UI with sidebar navigation across all modules  
+
+---
+
+## Architecture
+
+```
+User
+  ↓
+Streamlit UI (CreditIQ)
+  ↓
+┌─────────────────────────────────────────────────────────┐
+│  Risk Prediction / Rules / Explainability  →  FastAPI   │
+│  Dashboard / Data Explorer / AI Analyst    →  Local ML  │
+│       + portfolio snapshot + SQLite (analyst only)      │
+└─────────────────────────────────────────────────────────┘
+  ↓
+LightGBM model (default probability)
+  ↓
+SHAP explainability (global + local contributions)
+  ↓
+Business rules layer (policy + recommendation)
+```
+
+- **Streamlit** — single app shell (`ui/streamlit_app.py`), page modules per feature.  
+- **FastAPI** — inference and rules for individual applicants (`/predict`, `/decision`, `/rules`, `/health`, `/dashboard/summary`).  
+- **Portfolio batch scoring** — training CSV scored once; metrics cached in `models/portfolio_scoring_snapshot.json` for the executive dashboard.  
+- **AI Data Analyst** — loads `application_train` into **SQLite** in-process for supported NL→SQL intents (no external database server).  
+
+---
+
+## Machine learning pipeline
+
+| Stage | Description |
+|-------|-------------|
+| Dataset | Home Credit `application_train` (307,511 labeled rows) |
+| Feature engineering | 21 model features (bureau scores, amounts, ratios, tenure, demographics) |
+| Imputation | Median imputation (`SimpleImputer`, training-fit) |
+| Training | LightGBM classifier |
+| Scoring | Default probability at tuned threshold |
+| Risk bands | Low / Medium / High from probability cutoffs |
+| Decision | Model decision + rules → Approve / Review / Decline |
+
+### Holdout metrics (Phase 1)
 
 | Metric | Value |
 |--------|-------|
 | ROC-AUC | 0.7516 |
-| Threshold | 0.67 |
-| Accuracy | 0.862 |
-| Precision | 0.257 |
-| Recall | 0.374 |
-| F1 | 0.305 |
-| Features | 21 |
+| Accuracy | 0.8620 |
+| Precision | 0.2566 |
+| Recall | 0.3742 |
+| F1 score | 0.3045 |
+| Decision threshold | 0.67 |
 
 ---
 
-## Architecture Overview
+## Portfolio metrics (scored training book)
 
-```
-┌─────────────────────┐     HTTP      ┌──────────────────────┐
-│  Streamlit UI       │ ────────────► │  FastAPI (src/api)   │
-│  ui/streamlit_app   │               │  /predict /decision  │
-└─────────────────────┘               │  /rules              │
-                                      └──────────┬───────────┘
-                                                 │
-                    ┌────────────────────────────┼────────────────────────────┐
-                    ▼                            ▼                            ▼
-            src/ml/predict.py           src/ml/rules.py              src/data/preprocessor.py
-            (LightGBM inference)        (RuleCondition evaluators)   (feature engineering)
-                    │                            │
-                    └────────────┬───────────────┘
-                                 ▼
-                         models/
-                    model.pkl · metrics.json
-                    feature_names.json · shap_values.npy
-```
+Batch-scored portfolio used for dashboard and analyst context:
 
-**Decision flow:** raw applicant fields → feature engineering → model probability → risk band → rule evaluation → final recommendation (with conflict resolution when approve/decline rules overlap).
+| Metric | Value |
+|--------|-------|
+| Applications | 307,511 |
+| Observed default rate | 8.1% |
+| Approval rate (policy) | 56.2% |
+| High-risk exposure (HIGH band) | 12.0% |
 
 ---
 
-## Project Structure
+## Screens
 
-```
-credit_risk_prediction/
-├── src/
-│   ├── api/main.py           # FastAPI entry point
-│   ├── data/                 # Artifact loader, preprocessor
-│   ├── ml/                   # predict, rules, rule_explain
-│   └── utils/config.py       # Paths, thresholds, portfolio size
-├── ui/
-│   ├── streamlit_app.py      # App shell & navigation
-│   ├── risk_prediction_page.py
-│   ├── explainability_page.py
-│   └── decision_rules_page.py
-├── models/                   # Trained artifacts (committed for inference)
-├── documents/
-│   └── phase1_findings.md    # EDA & training summary
-├── Dockerfile
-├── requirements.txt
-└── README.md
-```
+All UI captures live in [`documents/screenshots/`](documents/screenshots/). Multiple images per page show scroll / section views.
+
+### Executive Dashboard
+
+Portfolio KPIs, portfolio analytics, and underwriting insights.
+
+| | |
+|:---:|:---:|
+| Overview & KPIs | Portfolio analytics |
+| ![Dashboard 1](documents/screenshots/dashboard1.png) | ![Dashboard 2](documents/screenshots/dashboard2.png) |
+
+### Data Explorer
+
+Demographics, financial analysis, and risk sections.
+
+| | |
+|:---:|:---:|
+| Overview | Demographics / financial |
+| ![Data Explorer 1](documents/screenshots/data_explorer1.png) | ![Data Explorer 2](documents/screenshots/data_explorer2.png) |
+
+![Data Explorer 3 — risk & data quality](documents/screenshots/data_explorer3.png)
+
+### Risk Prediction
+
+Applicant form and scoring result.
+
+| | |
+|:---:|:---:|
+| Applicant input | Decision output |
+| ![Risk Prediction 1](documents/screenshots/risk_prediction1.png) | ![Risk Prediction 2](documents/screenshots/risk_prediction2.png) |
+
+### Explainability
+
+Applicant-level drivers and SHAP contribution view.
+
+| | |
+|:---:|:---:|
+| Risk summary & drivers | SHAP contributions |
+| ![Explainability 1](documents/screenshots/explainability1.png) | ![Explainability 2](documents/screenshots/explainability2.png) |
+
+### Decision Rules
+
+Policy catalog, metrics, and rule detail.
+
+| | |
+|:---:|:---:|
+| Rules library | Rule evaluation |
+| ![Decision Rules 1](documents/screenshots/decision_rules1.png) | ![Decision Rules 2](documents/screenshots/decision_rules2.png) |
+
+![Decision Rules 3](documents/screenshots/decision_rules3.png)
+
+### AI Data Analyst
+
+Natural language query and portfolio insight.
+
+| | |
+|:---:|:---:|
+| Query & SQL | Results & insight |
+| ![AI Data Analyst 1](documents/screenshots/ai_data_analyst1.png) | ![AI Data Analyst 2](documents/screenshots/ai_data_analyst2.png) |
+
+### Model & EDA (training phase)
+
+| Asset | File |
+|-------|------|
+| ROC curve | `documents/screenshots/roc_curve.png` |
+| SHAP summary (training) | `documents/screenshots/shap_summary.png` |
+| Confusion matrix | `documents/screenshots/confusion_matrix.png` |
 
 ---
 
-## Installation Instructions
+## Installation
 
-**Requirements:** Python 3.11+, Git
+**Requirements:** Python 3.11+, Git  
+
+**1. Clone and enter the project**
 
 ```powershell
-# Clone the repository
 git clone https://github.com/Nailasalim/<repo-name>.git
-cd <repo-name>
+cd credit_risk_prediction
+```
 
-# Create and activate a virtual environment (recommended)
+**2. Create a virtual environment**
+
+```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+```
 
-# Install dependencies
+**3. Install dependencies**
+
+```powershell
 pip install -r requirements.txt
 ```
 
-Set the project root on `PYTHONPATH` when running locally:
+Use **`scikit-learn==1.7.0`** as pinned in `requirements.txt` (matches `models/imputer.pkl`).
+
+**4. Add the dataset**
+
+Place `application_train.csv` in `data/` (not committed to Git).  
+Optional: set `CREDIT_RISK_PORTFOLIO_CSV` to another path.
+
+**5. Set Python path**
 
 ```powershell
 $env:PYTHONPATH="."
 ```
 
-Optional environment variable:
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `CREDIT_RISK_API_URL` | `http://127.0.0.1:8000` | Streamlit → API base URL |
-
 ---
 
-## Running the API
+## Run locally
 
-From the project root:
+### Start the API (Risk Prediction, Decision Rules, API-backed flows)
 
 ```powershell
 $env:PYTHONPATH="."
 uvicorn src.api.main:app --reload --port 8000
 ```
 
-**Endpoints**
+API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Health check |
-| POST | `/predict` | Default probability, risk band, decision |
-| POST | `/decision` | Prediction + matched rules + recommendation |
-| GET | `/rules` | Active rules catalog |
+### Start the Streamlit UI
 
-Interactive docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-
----
-
-## Running the Streamlit UI
-
-With the API running in a separate terminal:
+In a second terminal:
 
 ```powershell
 $env:PYTHONPATH="."
 streamlit run ui/streamlit_app.py
 ```
 
-Open [http://localhost:8501](http://localhost:8501). Use **Risk Prediction** to submit an applicant, then **Explainability** or **Decision Rules** to inspect results.
+Open [http://localhost:8501](http://localhost:8501)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CREDIT_RISK_API_URL` | `http://127.0.0.1:8000` | UI → FastAPI |
+| `CREDIT_RISK_PORTFOLIO_CSV` | `data/application_train.csv` | Dashboard, EDA, AI analyst |
+
+First dashboard load may take ~10–15 seconds while the portfolio snapshot is built or refreshed.
 
 ---
 
-## Current Screenshots
+## Run with Docker
 
-<!-- Add screenshots before final submission -->
+**Prerequisites:** Docker Desktop, `data/application_train.csv`, and `models/` artifacts on the host.
 
-| Screen | File |
-|--------|------|
-| Risk Prediction | `documents/screenshots/` — _pending_ |
-| Explainability | `documents/screenshots/shap_summary.png` |
-| Decision Rules | _pending_ |
-| ROC / metrics | `documents/screenshots/roc_curve.png` |
+```powershell
+docker compose up --build
+```
+
+| Service | URL |
+|---------|-----|
+| Frontend (Streamlit) | [http://localhost:8501](http://localhost:8501) |
+| Backend (FastAPI) | [http://localhost:8000](http://localhost:8000) |
+
+The frontend waits for the backend health check and uses `CREDIT_RISK_API_URL=http://backend:8000` inside the Compose network.
 
 ---
 
-## Future Work
+## Demo credentials
 
-- [ ] Dashboard KPIs and portfolio analytics
-- [ ] Data Explorer and Talk To Data (NL-to-SQL)
-- [ ] Reports export (PDF / audit trail)
-- [ ] Retrain pipeline (`src/ml/train.py`) and CI for model promotion
-- [ ] Git LFS or artifact registry for large model/SHAP files
-- [ ] Docker Compose for API + UI orchestration
-- [ ] Authentication and role-based access for production deployment
+Primary demo account:
+
+| Field | Value |
+|-------|-------|
+| **Username** | `analyst` |
+| **Password** | `CreditIQ2024` |
+
+Additional demo users (login expander): `admin` / `admin123`, `risk_officer` / `risk2024`.
+
+After sign-in you are redirected to the **Executive Dashboard**.
+
+### Suggested 3-minute demo path
+
+1. **Dashboard** — portfolio KPIs and analytics  
+2. **Risk Prediction** — score one applicant (API running)  
+3. **Explainability** — review drivers for that applicant  
+4. **Decision Rules** — show matched policies  
+5. **AI Data Analyst** — e.g. “Summarize portfolio” or a suggested chip  
+
+---
+
+## Project structure
+
+```
+credit_risk_prediction/
+├── src/api/              # FastAPI
+├── src/data/             # Loading, preprocessing, portfolio CSV
+├── src/ml/               # Predict, rules, portfolio analytics, SHAP importance
+├── ui/                   # Streamlit pages (dashboard, EDA, risk, XAI, rules, analyst, login)
+├── models/               # model.pkl, imputer.pkl, metrics, SHAP, portfolio snapshot
+├── data/                 # application_train.csv (local)
+├── scripts/              # Utility scripts (e.g. imputer fit)
+├── documents/            # project_journal.md, findings, screenshots
+├── Dockerfile
+├── docker-compose.yml
+└── requirements.txt
+```
+
+---
+
+## Project status
+
+**Current status:** Feature complete for demonstration and portfolio use.
+
+| Module | Status |
+|--------|--------|
+| Executive Dashboard | ✓ Complete |
+| Data Explorer | ✓ Complete |
+| Risk Prediction | ✓ Complete |
+| Explainability | ✓ Complete |
+| Decision Rules | ✓ Complete |
+| AI Data Analyst | ✓ Complete |
+| Login & app shell | ✓ Complete |
+| Docker deployment | ✓ Complete |
+
+Further detail: [documents/project_journal.md](documents/project_journal.md)
+
+---
+
+## Future enhancements
+
+Optional improvements beyond the current demo scope:
+
+- Model monitoring and alert thresholds  
+- Feature and prediction drift detection  
+- Production authentication (SSO / managed users)  
+- Automated retraining and model promotion pipeline  
 
 ---
 
 ## License
 
-Private submission checkpoint — all rights reserved unless otherwise specified by the assignment.
+Private submission / portfolio use — all rights reserved unless otherwise specified by the assignment.

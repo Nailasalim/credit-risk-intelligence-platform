@@ -554,6 +554,8 @@ def _render_advanced_inputs(
 
 
 RISK_FORM_WIDGET_KEYS: tuple[str, ...] = (
+    "applicant_name",
+    "applicant_id",
     "fin_income",
     "fin_credit",
     "fin_annuity",
@@ -584,6 +586,8 @@ def _clear_risk_form_state() -> None:
     st.session_state.risk_elapsed_ms = 0.0
     st.session_state.risk_error = None
     st.session_state.pop("last_applicant_payload", None)
+    st.session_state.pop("applicant_name", None)
+    st.session_state.pop("applicant_id", None)
 
 
 def render_applicant_form() -> dict[str, Any] | None:
@@ -592,6 +596,23 @@ def render_applicant_form() -> dict[str, Any] | None:
 
     with st.form("risk_prediction_form", clear_on_submit=False):
         st.markdown('<div class="rp-form-panel">', unsafe_allow_html=True)
+
+        st.markdown('<p class="rp-section-title">Applicant identity</p>', unsafe_allow_html=True)
+        id1, id2 = st.columns(2)
+        with id1:
+            applicant_name = st.text_input(
+                "Applicant name",
+                value=st.session_state.get("applicant_name", ""),
+                placeholder="e.g. Priya Nair",
+                key="applicant_name",
+            )
+        with id2:
+            applicant_id = st.text_input(
+                "Applicant ID",
+                value=st.session_state.get("applicant_id", ""),
+                placeholder="e.g. APP-100291",
+                key="applicant_id",
+            )
 
         st.markdown('<p class="rp-section-title">Financial profile</p>', unsafe_allow_html=True)
         fin1, fin2 = st.columns(2)
@@ -676,6 +697,8 @@ def render_applicant_form() -> dict[str, Any] | None:
         return None
 
     return {
+        "applicant_name": applicant_name,
+        "applicant_id": applicant_id,
         "ext_source_1": ext1,
         "ext_source_2": ext2,
         "ext_source_3": ext3,
@@ -728,12 +751,19 @@ def render_risk_prediction_page(page_header_fn: Callable[..., None]) -> None:
         if form_data is not None:
             try:
                 with st.spinner("Scoring…"):
-                    result, elapsed = post_decision(api_base, build_model_payload(form_data))
-                st.session_state.risk_result = result
+                    model_payload = build_model_payload(form_data)
+                    result, elapsed = post_decision(api_base, model_payload)
+                from assessment_store import record_assessment
+
+                record_assessment(
+                    str(form_data.get("applicant_name", "")),
+                    str(form_data.get("applicant_id", "")),
+                    model_payload,
+                    result,
+                )
                 st.session_state.risk_elapsed_ms = elapsed
                 st.session_state.risk_status = "success"
                 st.session_state.risk_error = None
-                st.session_state.last_applicant_payload = build_model_payload(form_data)
             except DecisionAPIError as exc:
                 st.session_state.risk_status = "error"
                 st.session_state.risk_error = str(exc)

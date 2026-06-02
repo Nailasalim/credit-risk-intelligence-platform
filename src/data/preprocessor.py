@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from src.data.loader import load_feature_names
+from src.data.training_imputer import impute_feature_frame
 from src.utils.config import DAYS_EMPLOYED_UNKNOWN
 
 logger = logging.getLogger(__name__)
@@ -87,8 +88,11 @@ def preprocess_applicant(data: dict[str, Any]) -> pd.DataFrame:
                 f"Missing model features after preprocessing: {missing_features}"
             )
 
-        model_input = df[feature_names]
-        logger.debug("Preprocessed applicant with %d features", len(feature_names))
+        engineered = df[feature_names]
+        model_input = impute_feature_frame(engineered)
+        logger.debug(
+            "Preprocessed applicant with %d features (median-imputed)", len(feature_names)
+        )
         return model_input
     except PreprocessingError:
         raise

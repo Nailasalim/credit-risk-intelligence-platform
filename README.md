@@ -135,6 +135,142 @@ Business rules layer (policy + recommendation)
 
 ---
 
+## Model selection rationale
+
+**LightGBM** was selected as the production classifier for this credit-risk use case because it offers the best balance between **predictive performance** and **interpretability** in a tabular underwriting workflow.
+
+| Consideration | Why LightGBM fits |
+|---------------|-------------------|
+| Tabular performance | Strong results on structured financial and bureau features |
+| Training & inference | Efficient on large applicant volumes (307k+ rows) |
+| Heterogeneous inputs | Handles mixed numeric ratios, tenure, and score features natively |
+| Feature interactions | Gradient boosting captures non-linear risk combinations |
+| Credit-risk fit | Widely used for default / delinquency modelling |
+| Explainability | Pairs with SHAP and rule layers for analyst-facing transparency |
+
+LightGBM outperformed simpler baselines in holdout evaluation while remaining practical to deploy behind FastAPI and batch portfolio scoring.
+
+---
+
+## Class imbalance strategy
+
+The Home Credit training set reflects a **real-world imbalanced** outcome distribution:
+
+| Class | Share |
+|-------|-------|
+| Non-default | 91.9% |
+| Default | 8.1% |
+
+**Approach**
+
+- The **natural class distribution was preserved** for training and evaluation — no aggressive oversampling (e.g. SMOTE) was applied in the final deployment pipeline.  
+- **Accuracy alone was not relied upon** as the primary success metric given the imbalance.  
+- Model quality was assessed with **ROC-AUC**, **precision**, **recall**, and **F1** on holdout data (see table above).  
+- **Threshold tuning** (0.67) was used to align predicted default probability with business objectives — balancing approval volume, review workload, and detection of high-risk applicants.
+
+This strategy keeps evaluation honest on rare-default detection while supporting underwriting policy via risk bands and decisions.
+
+---
+
+## Rule derivation logic
+
+Underwriting rules in CreditIQ complement the LightGBM score. They are derived from:
+
+- **Predicted probability of default** and tuned threshold behaviour  
+- **Risk band thresholds** (Low / Medium / High)  
+- **Portfolio risk policies** aligned with batch-scored segment behaviour  
+- **Financial risk indicators** surfaced in the rule catalog (bureau scores, exposure, annuity stress, tenure, etc.)
+
+**Policy flow (band → action)**
+
+| Risk band | Typical action |
+|-----------|----------------|
+| Low risk | Approve |
+| Medium risk | Review |
+| High risk | Decline |
+
+Rules do not replace the model; they **translate model output into business language**, highlight which policies fire for an applicant, and improve **transparency** for credit analysts and reviewers. Final recommendations combine model probability, band assignment, and rule evaluation in the Decision Rules and Risk Prediction modules.
+
+---
+
+## Example decision outputs
+
+Representative **system outputs** (illustrative bands and scores — not tied to a specific applicant form submission):
+
+**Prediction output — low risk**
+
+| Field | Value |
+|-------|-------|
+| Risk score | 22 |
+| Risk band | Low |
+| Decision | Approve |
+
+**Reason:** Low predicted default probability and acceptable risk profile.
+
+---
+
+**Prediction output — medium risk**
+
+| Field | Value |
+|-------|-------|
+| Risk score | 54 |
+| Risk band | Medium |
+| Decision | Review |
+
+**Reason:** Moderate risk indicators require manual assessment.
+
+---
+
+**Prediction output — high risk**
+
+| Field | Value |
+|-------|-------|
+| Risk score | 81 |
+| Risk band | High |
+| Decision | Decline |
+
+**Reason:** High predicted default probability and elevated portfolio risk contribution.
+
+---
+
+## Prompt engineering & query design
+
+The **AI Data Analyst** module answers portfolio questions in natural language. It does **not** use OpenAI, Gemini, LangChain, RAG, or any external LLM API.
+
+**How it works**
+
+1. The user asks a question in plain English (or selects a suggested chip).  
+2. The system maps the text to a **supported business intent** via deterministic pattern matching.  
+3. Each intent resolves to a **predefined SQL template**.  
+4. SQL runs against an **in-memory SQLite** database built from `application_train` and portfolio KPI seeds.
+
+**Benefits**
+
+| Benefit | Description |
+|---------|-------------|
+| No hallucinations | Only whitelisted queries can run |
+| Consistent results | Same question → same SQL → same numbers |
+| Fast execution | Local SQLite, no network inference |
+| Explainable behaviour | Intent, SQL, and result table are visible to the user |
+
+This design prioritises **auditability** and **reproducibility** for portfolio analytics in a regulated-style demo context.
+
+---
+
+## Token optimization strategy
+
+Because CreditIQ’s AI Data Analyst uses **no external LLM**:
+
+- **No token consumption** — there are no prompt/ completion API calls.  
+- **No prompt context management** — no sliding windows, embeddings, or retrieval pipelines.  
+- **No API costs** for natural-language portfolio Q&A.  
+- **SQL templates** eliminate open-ended text generation and unnecessary inference overhead.  
+- **Deterministic execution** keeps latency low and behaviour predictable.
+
+The architecture was intentionally designed for **reliability**, **explainability**, and **low operational cost** while still offering a conversational analyst experience in the UI.
+
+---
+
 ## Portfolio metrics (scored training book)
 
 Batch-scored portfolio used for dashboard and analyst context:

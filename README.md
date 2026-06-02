@@ -85,23 +85,7 @@ Only capabilities that are implemented and available in the app today.
 
 ## Architecture
 
-```
-User
-  ↓
-Streamlit UI (CreditIQ)
-  ↓
-┌─────────────────────────────────────────────────────────┐
-│  Risk Prediction / Rules / Explainability  →  FastAPI   │
-│  Dashboard / Data Explorer / AI Analyst    →  Local ML  │
-│       + portfolio snapshot + SQLite (analyst only)      │
-└─────────────────────────────────────────────────────────┘
-  ↓
-LightGBM model (default probability)
-  ↓
-SHAP explainability (global + local contributions)
-  ↓
-Business rules layer (policy + recommendation)
-```
+![CreditIQ system architecture](documents/screenshots/architecture_diag.png)
 
 - **Streamlit** — single app shell (`ui/streamlit_app.py`), page modules per feature.  
 - **FastAPI** — inference and rules for individual applicants (`/predict`, `/decision`, `/rules`, `/health`, `/dashboard/summary`).  
